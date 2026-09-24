@@ -6,8 +6,8 @@ const connectDB = require('./config/db');
 // Load environment variables
 dotenv.config();
 
-// Connect to MongoDB Atlas
-connectDB();
+// Initialize DB connection in background
+connectDB().catch(err => console.error('Initial DB connection error:', err.message));
 
 const app = express();
 
@@ -15,6 +15,27 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+
+// Ensure DB is connected for serverless invocations
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    res.status(500).json({ error: 'Database connection failed: ' + err.message });
+  }
+});
+
+// Root welcome route
+app.get('/', (req, res) => {
+  res.json({
+    status: 'online',
+    app: 'Rent & Electricity Tracker API',
+    database: 'MongoDB Atlas',
+    healthCheck: '/api/health',
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // Health Check Route
 app.get('/api/health', (req, res) => {
@@ -35,6 +56,14 @@ app.use('/api/settings', require('./routes/settingRoutes'));
 app.use('/api/upload', require('./routes/uploadRoutes'));
 app.use('/api/sync', require('./routes/syncRoutes'));
 
+// 404 handler for unknown routes
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'Route not found',
+    requestedUrl: req.originalUrl,
+  });
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Server error:', err.stack);
@@ -43,6 +72,11 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server running on port ${PORT} (http://localhost:${PORT})`);
-});
+// Only listen directly when not running in Vercel serverless environment
+if (!process.env.VERCEL) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server running on port ${PORT} (http://localhost:${PORT})`);
+  });
+}
+
+module.exports = app;

@@ -1,16 +1,9 @@
 {
   "version": 2,
-  "name": "rent-traker-backend",
-  "builds": [
+  "rewrites": [
     {
-      "src": "app.js",
-      "use": "@vercel/node"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/app.js"
+      "source": "/(.*)",
+      "destination": "/api/index.js"
     }
   ]
 }
