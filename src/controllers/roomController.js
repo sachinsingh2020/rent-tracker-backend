@@ -1,0 +1,86 @@
+const Room = require('../models/Room');
+const Tenant = require('../models/Tenant');
+
+// @desc    Get all rooms with current active tenant
+// @route   GET /api/rooms
+exports.getRooms = async (req, res) => {
+  try {
+    const rooms = await Room.find().sort({ roomNumber: 1 }).lean();
+
+    // Attach active tenant info to each room
+    const enrichedRooms = await Promise.all(
+      rooms.map(async (room) => {
+        const activeTenant = await Tenant.findOne({
+          roomId: room._id,
+          status: 'Active',
+        }).select('name phone negotiatedRent latestReading initialReading moveInDate');
+        return {
+          ...room,
+          activeTenant: activeTenant || null,
+        };
+      })
+    );
+
+    res.json(enrichedRooms);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// @desc    Create new room
+// @route   POST /api/rooms
+exports.createRoom = async (req, res) => {
+  try {
+    const { roomNumber, floor, defaultRent, notes } = req.body;
+
+    if (!roomNumber) {
+      return res.status(400).json({ error: 'Room number is required' });
+    }
+
+    const room = await Room.create({
+      roomNumber,
+      floor: floor || 'Ground Floor',
+      defaultRent: Number(defaultRent) || 6000,
+      notes,
+    });
+
+    res.status(201).json(room);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// @desc    Update room details
+// @route   PUT /api/rooms/:id
+exports.updateRoom = async (req, res) => {
+  try {
+    const room = await Room.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    res.json(room);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// @desc    Delete a room
+// @route   DELETE /api/rooms/:id
+exports.deleteRoom = async (req, res) => {
+  try {
+    const room = await Room.findById(req.params.id);
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+
+    // Check if tenant is currently active
+    const activeTenant = await Tenant.findOne({ roomId: room._id, status: 'Active' });
+    if (activeTenant) {
+      return res.status(400).json({ error: 'Cannot delete room with an active tenant.' });
+    }
+
+    await room.deleteOne();
+    res.json({ success: true, message: 'Room removed' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
