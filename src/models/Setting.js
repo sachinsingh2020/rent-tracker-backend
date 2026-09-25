@@ -16,6 +16,14 @@ const SettingSchema = new mongoose.Schema(
       type: Number,
       default: 6000.00,
     },
+    ownerName: {
+      type: String,
+      default: '',
+    },
+    upiId: {
+      type: String,
+      default: '',
+    },
   },
   { timestamps: true }
 );

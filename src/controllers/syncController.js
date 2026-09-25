@@ -180,12 +180,14 @@ exports.syncOfflineData = async (req, res) => {
     }
 
     // 4. Sync Settings
-    if (settings && (settings.defaultElectricityRate || settings.defaultRoomRent)) {
+    if (settings && (settings.defaultElectricityRate || settings.defaultRoomRent || settings.ownerName || settings.upiId)) {
       await Setting.findOneAndUpdate(
         { key: 'global_defaults' },
         {
           defaultElectricityRate: Number(settings.defaultElectricityRate) || 11,
           defaultRoomRent: Number(settings.defaultRoomRent) || 6000,
+          ownerName: String(settings.ownerName || '').trim(),
+          upiId: String(settings.upiId || '').trim(),
         },
         { upsert: true, new: true }
       );
@@ -252,8 +254,10 @@ exports.getExportData = async (req, res) => {
         ? {
             defaultElectricityRate: settingDoc.defaultElectricityRate || 11,
             defaultRoomRent: settingDoc.defaultRoomRent || 6000,
+            ownerName: settingDoc.ownerName || '',
+            upiId: settingDoc.upiId || '',
           }
-        : { defaultElectricityRate: 11, defaultRoomRent: 6000 },
+        : { defaultElectricityRate: 11, defaultRoomRent: 6000, ownerName: '', upiId: '' },
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

@@ -22,7 +22,7 @@ exports.getSettings = async (req, res) => {
 // @route   PUT /api/settings
 exports.updateSettings = async (req, res) => {
   try {
-    const { defaultElectricityRate, defaultRoomRent } = req.body;
+    const { defaultElectricityRate, defaultRoomRent, ownerName, upiId } = req.body;
 
     let setting = await Setting.findOne({ key: 'global_defaults' });
     if (!setting) {
@@ -34,6 +34,12 @@ exports.updateSettings = async (req, res) => {
     }
     if (defaultRoomRent !== undefined) {
       setting.defaultRoomRent = Number(defaultRoomRent);
+    }
+    if (ownerName !== undefined) {
+      setting.ownerName = String(ownerName).trim();
+    }
+    if (upiId !== undefined) {
+      setting.upiId = String(upiId).trim();
     }
 
     await setting.save();
