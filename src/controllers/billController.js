@@ -113,8 +113,24 @@ exports.deleteBill = async (req, res) => {
     const bill = await MonthlyBill.findById(req.params.id);
     if (!bill) return res.status(404).json({ error: 'Bill record not found' });
 
+    const tenantId = bill.tenantId;
     await bill.deleteOne();
-    res.json({ success: true, message: 'Bill removed' });
+
+    // Recalculate tenant's latestReading based on remaining bills or initialReading
+    if (tenantId) {
+      const remainingBills = await MonthlyBill.find({ tenantId }).sort({ billDate: -1, createdAt: -1 });
+      const tenant = await Tenant.findById(tenantId);
+      if (tenant) {
+        if (remainingBills.length > 0) {
+          tenant.latestReading = remainingBills[0].currentReading;
+        } else {
+          tenant.latestReading = tenant.initialReading || 0;
+        }
+        await tenant.save();
+      }
+    }
+
+    res.json({ success: true, message: 'Bill removed and meter reading rolled back successfully.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

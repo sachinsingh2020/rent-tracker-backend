@@ -72,14 +72,13 @@ exports.deleteRoom = async (req, res) => {
     const room = await Room.findById(req.params.id);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
-    // Check if tenant is currently active
-    const activeTenant = await Tenant.findOne({ roomId: room._id, status: 'Active' });
-    if (activeTenant) {
-      return res.status(400).json({ error: 'Cannot delete room with an active tenant.' });
-    }
+    // Clean up all associated tenants and bills of this room
+    const MonthlyBill = require('../models/MonthlyBill');
+    await Tenant.deleteMany({ roomId: room._id });
+    await MonthlyBill.deleteMany({ roomId: room._id });
 
     await room.deleteOne();
-    res.json({ success: true, message: 'Room removed' });
+    res.json({ success: true, message: 'Room and its associated records removed successfully.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
