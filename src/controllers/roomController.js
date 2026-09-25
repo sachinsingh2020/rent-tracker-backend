@@ -13,7 +13,9 @@ exports.getRooms = async (req, res) => {
         const activeTenant = await Tenant.findOne({
           roomId: room._id,
           status: 'Active',
-        }).select('name phone negotiatedRent latestReading initialReading moveInDate');
+        })
+          .sort({ updatedAt: -1, createdAt: -1 })
+          .select('name phone photoUrl negotiatedRent latestReading initialReading moveInDate');
         return {
           ...room,
           activeTenant: activeTenant || null,

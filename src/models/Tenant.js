@@ -47,6 +47,16 @@ const TenantSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    photoUrl: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    photoPublicId: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     status: {
       type: String,
       enum: ['Active', 'Vacated'],

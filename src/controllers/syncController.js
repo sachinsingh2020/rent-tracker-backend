@@ -4,6 +4,12 @@ const Tenant = require('../models/Tenant');
 const MonthlyBill = require('../models/MonthlyBill');
 const Setting = require('../models/Setting');
 
+const normalizePhone = (phone) => {
+  if (!phone) return '';
+  const digits = String(phone).replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+};
+
 // @desc    Bulk sync offline SQLite data into MongoDB
 // @route   POST /api/sync
 exports.syncOfflineData = async (req, res) => {
@@ -15,8 +21,36 @@ exports.syncOfflineData = async (req, res) => {
       tenants: {},
     };
 
-    // 1. Sync Rooms
+    const existingTenantCount = await Tenant.countDocuments();
+    const existingRoomCount = await Room.countDocuments();
+    const cloudHasRealData = existingTenantCount > 0 || existingRoomCount > 0;
+
+    // Filter out dummy starter placeholder seed if cloud already contains real data
+    const cleanTenants = tenants.filter((t) => {
+      if (cloudHasRealData && t.id === 'tenant_1' && t.name === 'Ramesh Kumar') {
+        return false;
+      }
+      return true;
+    });
+
+    const cleanBills = bills.filter((b) => {
+      if (cloudHasRealData && b.id === 'bill_1' && b.tenantId === 'tenant_1') {
+        return false;
+      }
+      return true;
+    });
+
+    // 1. Sync Rooms (Handle room number conflicts gracefully)
     for (const r of rooms) {
+      if (cloudHasRealData && (r.id === 'room_101' || r.id === 'room_102') && r.notes === 'Corner room with balcony') {
+        const existingSameRoom = await Room.findOne({ roomNumber: String(r.roomNumber).trim() });
+        if (existingSameRoom) {
+          idMap.rooms[r.id] = existingSameRoom._id;
+          idMap.rooms[r.roomNumber] = existingSameRoom._id;
+          continue;
+        }
+      }
+
       let roomDoc;
       if (r.cloudId && mongoose.isValidObjectId(r.cloudId)) {
         roomDoc = await Room.findById(r.cloudId);
@@ -28,8 +62,12 @@ exports.syncOfflineData = async (req, res) => {
       if (roomDoc) {
         roomDoc.floor = r.floor || roomDoc.floor;
         roomDoc.defaultRent = Number(r.defaultRent) || roomDoc.defaultRent;
-        roomDoc.status = r.status || roomDoc.status;
-        roomDoc.notes = r.notes || roomDoc.notes;
+        if (roomDoc.status !== 'Occupied' && r.status) {
+          roomDoc.status = r.status;
+        }
+        if (r.notes && !roomDoc.notes) {
+          roomDoc.notes = r.notes;
+        }
         await roomDoc.save();
       } else {
         roomDoc = await Room.create({
@@ -45,42 +83,73 @@ exports.syncOfflineData = async (req, res) => {
       if (r.roomNumber) idMap.rooms[r.roomNumber] = roomDoc._id;
     }
 
-    // 2. Sync Tenants
-    for (const t of tenants) {
-      let tenantDoc;
-      let targetRoomId = idMap.rooms[t.roomId || t.localRoomId];
+    // 2. Sync Tenants: STRICTLY MATCH AND MERGE BY 10-DIGIT PHONE NUMBER!
+    for (const t of cleanTenants) {
+      let tenantDoc = null;
+      const cleanPhone = normalizePhone(t.phone);
 
+      // Priority 1: Match by normalized 10-digit phone number across all database tenants
+      if (cleanPhone && cleanPhone.length === 10) {
+        const allTenantsInDb = await Tenant.find();
+        tenantDoc = allTenantsInDb.find((dbT) => normalizePhone(dbT.phone) === cleanPhone);
+      }
+
+      // Priority 2: Match by cloudId if valid ObjectId
+      if (!tenantDoc && t.cloudId && mongoose.isValidObjectId(t.cloudId)) {
+        tenantDoc = await Tenant.findById(t.cloudId);
+      }
+
+      // Priority 3: Fallback to exact name match ONLY IF phone number is absent
+      if (!tenantDoc && !cleanPhone && t.name) {
+        tenantDoc = await Tenant.findOne({ name: t.name.trim() });
+      }
+
+      // Resolve target room
+      let targetRoomId = idMap.rooms[t.roomId || t.localRoomId];
       if (!targetRoomId && mongoose.isValidObjectId(t.roomId)) {
         targetRoomId = t.roomId;
       }
       if (!targetRoomId && t.room?.roomNumber) {
         targetRoomId = idMap.rooms[t.room.roomNumber];
       }
+      if (!targetRoomId && tenantDoc?.roomId) {
+        targetRoomId = tenantDoc.roomId;
+      }
       if (!targetRoomId) {
         const anyRoom = await Room.findOne();
         if (anyRoom) targetRoomId = anyRoom._id;
       }
 
-      if (t.cloudId && mongoose.isValidObjectId(t.cloudId)) {
-        tenantDoc = await Tenant.findById(t.cloudId);
-      }
-      if (!tenantDoc && targetRoomId && t.name) {
-        tenantDoc = await Tenant.findOne({ name: t.name, roomId: targetRoomId });
-      }
-
       if (tenantDoc) {
+        // Matched existing tenant -> non-destructively merge details
+        tenantDoc.name = t.name || tenantDoc.name;
         tenantDoc.phone = t.phone || tenantDoc.phone;
         tenantDoc.email = t.email || tenantDoc.email;
+        if (t.photoUrl && !tenantDoc.photoUrl) {
+          tenantDoc.photoUrl = t.photoUrl;
+          tenantDoc.photoPublicId = t.photoPublicId || '';
+        }
         tenantDoc.negotiatedRent = Number(t.negotiatedRent) || tenantDoc.negotiatedRent;
         tenantDoc.meterNumber = t.meterNumber || tenantDoc.meterNumber;
-        tenantDoc.latestReading = Math.max(Number(tenantDoc.latestReading) || 0, Number(t.latestReading) || 0);
-        tenantDoc.status = t.status || tenantDoc.status;
+        tenantDoc.latestReading = Math.max(
+          Number(tenantDoc.latestReading) || 0,
+          Number(t.latestReading) || 0
+        );
+        if (t.status === 'Active' || tenantDoc.status === 'Active') {
+          tenantDoc.status = 'Active';
+        }
+        if (targetRoomId) {
+          tenantDoc.roomId = targetRoomId;
+        }
         await tenantDoc.save();
       } else if (targetRoomId && t.name) {
+        // Brand new tenant from offline device
         tenantDoc = await Tenant.create({
-          name: t.name,
+          name: t.name.trim(),
           phone: t.phone || '',
           email: t.email || '',
+          photoUrl: t.photoUrl || '',
+          photoPublicId: t.photoPublicId || '',
           roomId: targetRoomId,
           negotiatedRent: Number(t.negotiatedRent) || 6000,
           securityDeposit: Number(t.securityDeposit) || 0,
@@ -96,18 +165,48 @@ exports.syncOfflineData = async (req, res) => {
       if (tenantDoc) {
         if (t.id) idMap.tenants[t.id] = tenantDoc._id;
         if (t.localId) idMap.tenants[t.localId] = tenantDoc._id;
+        if (cleanPhone) idMap.tenants[cleanPhone] = tenantDoc._id;
         if (t.name) idMap.tenants[t.name] = tenantDoc._id;
       }
     }
 
-    // 3. Sync Monthly Bills (enforcing 8-year retention policy & non-destructive merge)
+    // 3. Resolve Room Conflicts & Reconcile Room Occupancy Status
+    // Ensures occupied count NEVER exceeds room count (no 4/2 bug)
+    const allRooms = await Room.find();
+    for (const r of allRooms) {
+      const activeTenantsInRoom = await Tenant.find({
+        roomId: r._id,
+        status: 'Active',
+      }).sort({ updatedAt: -1, moveInDate: -1, createdAt: -1 });
+
+      if (activeTenantsInRoom.length === 0) {
+        r.status = 'Available';
+        await r.save();
+      } else if (activeTenantsInRoom.length === 1) {
+        r.status = 'Occupied';
+        await r.save();
+      } else {
+        // Room Conflict: Multiple active tenants assigned to the same room
+        // The newest active tenant stays Active, others are set to Vacated
+        const [keepActive, ...conflicts] = activeTenantsInRoom;
+        r.status = 'Occupied';
+        await r.save();
+
+        for (const conf of conflicts) {
+          conf.status = 'Vacated';
+          await conf.save();
+        }
+      }
+    }
+
+    // 4. Sync Monthly Bills (enforcing 8-year retention policy & non-destructive merge)
     const cutoff8Years = new Date();
     cutoff8Years.setFullYear(cutoff8Years.getFullYear() - 8);
 
-    for (const b of bills) {
+    for (const b of cleanBills) {
       const billDateObj = b.billDate ? new Date(b.billDate) : new Date();
       if (billDateObj < cutoff8Years) {
-        continue; // Skip syncing bills older than 8 years
+        continue;
       }
 
       let targetTenantId = idMap.tenants[b.tenantId || b.localTenantId];
@@ -133,7 +232,6 @@ exports.syncOfflineData = async (req, res) => {
         }
 
         if (!billDoc) {
-          // Bill does not exist on cloud -> create it so all historical readings are preserved!
           await MonthlyBill.create({
             tenantId: targetTenantId,
             roomId: targetRoomId,
@@ -154,7 +252,6 @@ exports.syncOfflineData = async (req, res) => {
             notes: b.notes || '',
           });
         } else {
-          // Bill already exists on cloud -> update payment status if marked Paid locally
           let changed = false;
           if (b.roomRentStatus === 'Paid' && billDoc.roomRentStatus !== 'Paid') {
             billDoc.roomRentStatus = 'Paid';
@@ -179,7 +276,7 @@ exports.syncOfflineData = async (req, res) => {
       }
     }
 
-    // 4. Sync Settings
+    // 5. Sync Settings
     if (settings && (settings.defaultElectricityRate || settings.defaultRoomRent || settings.ownerName || settings.upiId)) {
       await Setting.findOneAndUpdate(
         { key: 'global_defaults' },
@@ -195,7 +292,7 @@ exports.syncOfflineData = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Offline data successfully synced to MongoDB Atlas',
+      message: 'Offline data successfully synced and merged into MongoDB Atlas',
       idMap,
     });
   } catch (error) {
