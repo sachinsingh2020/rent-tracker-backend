@@ -21,8 +21,8 @@ router.post('/', upload.single('photo'), async (req, res) => {
       folder: 'renttracker_meter_photos',
       resource_type: 'image',
       transformation: [
-        { quality: 'auto', fetch_format: 'auto' },
-        { width: 1600, crop: 'limit' },
+        { quality: 'auto:eco', fetch_format: 'auto' },
+        { width: 1280, crop: 'limit' },
       ],
     });
 
