@@ -75,6 +75,7 @@ exports.verifyOtp = async (req, res) => {
 
     // Check if user exists or create new one
     let user = await User.findOne({ email: cleanEmail });
+    const isNewUser = !user;
     if (!user) {
       user = await User.create({
         name: name ? name.trim() : cleanEmail.split('@')[0],
@@ -87,6 +88,7 @@ exports.verifyOtp = async (req, res) => {
       name: user.name,
       email: user.email,
       token: generateToken(user._id),
+      isNewUser,
     });
   } catch (error) {
     console.error('Verify OTP Error:', error);
@@ -155,6 +157,7 @@ exports.googleAuth = async (req, res) => {
     }
 
     let user = await User.findOne({ $or: [{ googleId }, { email }] });
+    const isNewUser = !user;
 
     if (!user) {
       user = await User.create({
@@ -175,6 +178,7 @@ exports.googleAuth = async (req, res) => {
       email: user.email,
       avatar: user.avatar,
       token: generateToken(user._id),
+      isNewUser,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

@@ -73,7 +73,7 @@ exports.syncOfflineData = async (req, res) => {
         tenantDoc.email = t.email || tenantDoc.email;
         tenantDoc.negotiatedRent = Number(t.negotiatedRent) || tenantDoc.negotiatedRent;
         tenantDoc.meterNumber = t.meterNumber || tenantDoc.meterNumber;
-        tenantDoc.latestReading = Number(t.latestReading) || tenantDoc.latestReading;
+        tenantDoc.latestReading = Math.max(Number(tenantDoc.latestReading) || 0, Number(t.latestReading) || 0);
         tenantDoc.status = t.status || tenantDoc.status;
         await tenantDoc.save();
       } else if (targetRoomId && t.name) {
@@ -100,7 +100,7 @@ exports.syncOfflineData = async (req, res) => {
       }
     }
 
-    // 3. Sync Monthly Bills (enforcing 8-year retention policy)
+    // 3. Sync Monthly Bills (enforcing 8-year retention policy & non-destructive merge)
     const cutoff8Years = new Date();
     cutoff8Years.setFullYear(cutoff8Years.getFullYear() - 8);
 
@@ -133,6 +133,7 @@ exports.syncOfflineData = async (req, res) => {
         }
 
         if (!billDoc) {
+          // Bill does not exist on cloud -> create it so all historical readings are preserved!
           await MonthlyBill.create({
             tenantId: targetTenantId,
             roomId: targetRoomId,
@@ -152,6 +153,28 @@ exports.syncOfflineData = async (req, res) => {
             isFullyPaid: b.roomRentStatus === 'Paid' && b.electricityStatus === 'Paid',
             notes: b.notes || '',
           });
+        } else {
+          // Bill already exists on cloud -> update payment status if marked Paid locally
+          let changed = false;
+          if (b.roomRentStatus === 'Paid' && billDoc.roomRentStatus !== 'Paid') {
+            billDoc.roomRentStatus = 'Paid';
+            billDoc.roomRentPaidDate = b.roomRentPaidDate || new Date();
+            changed = true;
+          }
+          if (b.electricityStatus === 'Paid' && billDoc.electricityStatus !== 'Paid') {
+            billDoc.electricityStatus = 'Paid';
+            billDoc.electricityPaidDate = b.electricityPaidDate || new Date();
+            changed = true;
+          }
+          if (!billDoc.meterPhotoUrl && b.meterPhotoUrl) {
+            billDoc.meterPhotoUrl = b.meterPhotoUrl;
+            billDoc.meterPhotoPublicId = b.meterPhotoPublicId || '';
+            changed = true;
+          }
+          if (changed) {
+            billDoc.isFullyPaid = billDoc.roomRentStatus === 'Paid' && billDoc.electricityStatus === 'Paid';
+            await billDoc.save();
+          }
         }
       }
     }
@@ -175,6 +198,64 @@ exports.syncOfflineData = async (req, res) => {
     });
   } catch (error) {
     console.error('Sync Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// @desc    Check whether cloud account already contains existing data
+// @route   GET /api/sync/status
+exports.getSyncStatus = async (req, res) => {
+  try {
+    const roomsCount = await Room.countDocuments();
+    const tenantsCount = await Tenant.countDocuments();
+    const billsCount = await MonthlyBill.countDocuments();
+
+    res.json({
+      hasData: roomsCount > 0 || tenantsCount > 0 || billsCount > 0,
+      roomsCount,
+      tenantsCount,
+      billsCount,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// @desc    Export all cloud data to replace or update local device storage
+// @route   GET /api/sync/export
+exports.getExportData = async (req, res) => {
+  try {
+    const cutoff8Years = new Date();
+    cutoff8Years.setFullYear(cutoff8Years.getFullYear() - 8);
+
+    const cutoff12Months = new Date();
+    cutoff12Months.setMonth(cutoff12Months.getMonth() - 12);
+
+    const rooms = await Room.find().sort({ roomNumber: 1 }).lean();
+    const tenants = await Tenant.find().lean();
+    const rawBills = await MonthlyBill.find({ billDate: { $gte: cutoff8Years } })
+      .sort({ billDate: -1, createdAt: -1 })
+      .lean();
+
+    const bills = rawBills.map((b) => ({
+      ...b,
+      meterPhotoUrl: new Date(b.billDate || b.createdAt) < cutoff12Months ? '' : b.meterPhotoUrl,
+    }));
+
+    const settingDoc = await Setting.findOne({ key: 'global_defaults' }).lean();
+
+    res.json({
+      rooms,
+      tenants,
+      bills,
+      settings: settingDoc
+        ? {
+            defaultElectricityRate: settingDoc.defaultElectricityRate || 11,
+            defaultRoomRent: settingDoc.defaultRoomRent || 6000,
+          }
+        : { defaultElectricityRate: 11, defaultRoomRent: 6000 },
+    });
+  } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
