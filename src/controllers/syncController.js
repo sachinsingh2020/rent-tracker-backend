@@ -14,12 +14,112 @@ const normalizePhone = (phone) => {
 // @route   POST /api/sync
 exports.syncOfflineData = async (req, res) => {
   try {
-    const { rooms = [], tenants = [], bills = [], settings = {} } = req.body;
+    const { rooms = [], tenants = [], bills = [], settings = {}, overwriteCloud = false } = req.body;
 
     const idMap = {
       rooms: {},
       tenants: {},
     };
+
+    // If overwriteCloud is requested, completely wipe cloud database and mirror offline SQLite
+    if (overwriteCloud) {
+      await MonthlyBill.deleteMany({});
+      await Tenant.deleteMany({});
+      await Room.deleteMany({});
+
+      for (const r of rooms) {
+        const roomDoc = await Room.create({
+          roomNumber: String(r.roomNumber).trim(),
+          floor: r.floor || 'Ground Floor',
+          defaultRent: Number(r.defaultRent) || 6000,
+          status: r.status || 'Available',
+          notes: r.notes || '',
+        });
+        if (r.id) idMap.rooms[r.id] = roomDoc._id;
+        if (r.localId) idMap.rooms[r.localId] = roomDoc._id;
+        if (r.roomNumber) idMap.rooms[r.roomNumber] = roomDoc._id;
+      }
+
+      for (const t of tenants) {
+        let targetRoomId = idMap.rooms[t.roomId || t.localRoomId];
+        if (!targetRoomId && t.room?.roomNumber) {
+          targetRoomId = idMap.rooms[t.room.roomNumber];
+        }
+        if (!targetRoomId) {
+          const firstRoom = await Room.findOne();
+          if (firstRoom) targetRoomId = firstRoom._id;
+        }
+
+        if (targetRoomId && t.name) {
+          const tenantDoc = await Tenant.create({
+            name: t.name.trim(),
+            phone: t.phone || '',
+            email: t.email || '',
+            photoUrl: t.photoUrl || '',
+            photoPublicId: t.photoPublicId || '',
+            roomId: targetRoomId,
+            negotiatedRent: Number(t.negotiatedRent) || 6000,
+            securityDeposit: Number(t.securityDeposit) || 0,
+            meterNumber: t.meterNumber || '',
+            initialReading: Number(t.initialReading) || 0,
+            latestReading: Number(t.latestReading) || Number(t.initialReading) || 0,
+            moveInDate: t.moveInDate || new Date(),
+            status: t.status || 'Active',
+            notes: t.notes || '',
+          });
+          if (t.id) idMap.tenants[t.id] = tenantDoc._id;
+          if (t.localId) idMap.tenants[t.localId] = tenantDoc._id;
+          if (t.phone) idMap.tenants[t.phone] = tenantDoc._id;
+          if (t.name) idMap.tenants[t.name] = tenantDoc._id;
+        }
+      }
+
+      for (const b of bills) {
+        const targetTenantId = idMap.tenants[b.tenantId || b.localTenantId];
+        const targetRoomId = idMap.rooms[b.roomId || b.localRoomId];
+
+        if (targetTenantId && targetRoomId) {
+          await MonthlyBill.create({
+            tenantId: targetTenantId,
+            roomId: targetRoomId,
+            monthYear: b.monthYear,
+            billDate: b.billDate ? new Date(b.billDate) : new Date(),
+            roomRentAmount: Number(b.roomRentAmount) || 0,
+            roomRentStatus: b.roomRentStatus || 'Pending',
+            previousReading: Number(b.previousReading) || 0,
+            currentReading: Number(b.currentReading) || 0,
+            unitsConsumed: Number(b.unitsConsumed) || 0,
+            ratePerUnit: Number(b.ratePerUnit) || 11,
+            electricityAmount: Number(b.electricityAmount) || 0,
+            electricityStatus: b.electricityStatus || 'Pending',
+            meterPhotoUrl: b.meterPhotoUrl || '',
+            meterPhotoPublicId: b.meterPhotoPublicId || '',
+            totalDue: Number(b.totalDue) || 0,
+            isFullyPaid: b.roomRentStatus === 'Paid' && b.electricityStatus === 'Paid',
+            notes: b.notes || '',
+          });
+        }
+      }
+
+      if (settings && (settings.defaultElectricityRate || settings.defaultRoomRent || settings.ownerName || settings.upiId)) {
+        await Setting.findOneAndUpdate(
+          { key: 'global_defaults' },
+          {
+            defaultElectricityRate: Number(settings.defaultElectricityRate) || 11,
+            defaultRoomRent: Number(settings.defaultRoomRent) || 6000,
+            ownerName: String(settings.ownerName || '').trim(),
+            upiId: String(settings.upiId || '').trim(),
+          },
+          { upsert: true, new: true }
+        );
+      }
+
+      return res.json({
+        success: true,
+        message: 'Cloud data completely overwritten with offline data',
+        idMap,
+      });
+    }
 
     const existingTenantCount = await Tenant.countDocuments();
     const existingRoomCount = await Room.countDocuments();
