@@ -11,10 +11,16 @@ exports.getTenants = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    // Compute pending room rent dues & electricity dues for each tenant
+    const cutoff8Years = new Date();
+    cutoff8Years.setFullYear(cutoff8Years.getFullYear() - 8);
+
+    // Compute pending room rent dues & electricity dues for each tenant (within 8-year retention window)
     const enrichedTenants = await Promise.all(
       tenants.map(async (tenant) => {
-        const bills = await MonthlyBill.find({ tenantId: tenant._id }).lean();
+        const bills = await MonthlyBill.find({
+          tenantId: tenant._id,
+          billDate: { $gte: cutoff8Years },
+        }).lean();
 
         let pendingRent = 0;
         let pendingElectricity = 0;
@@ -44,7 +50,7 @@ exports.getTenants = async (req, res) => {
   }
 };
 
-// @desc    Get single tenant by ID with all bills (newest first)
+// @desc    Get single tenant by ID with all bills (newest first, 8-year history, 12-month photo limit)
 // @route   GET /api/tenants/:id
 exports.getTenantById = async (req, res) => {
   try {
@@ -54,10 +60,28 @@ exports.getTenantById = async (req, res) => {
 
     if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
 
-    // Fetch all monthly bills, newest first
-    const bills = await MonthlyBill.find({ tenantId: tenant._id })
+    const cutoff8Years = new Date();
+    cutoff8Years.setFullYear(cutoff8Years.getFullYear() - 8);
+
+    const cutoff12Months = new Date();
+    cutoff12Months.setMonth(cutoff12Months.getMonth() - 12);
+
+    // Fetch monthly bills strictly within the last 8 years, newest first
+    const rawBills = await MonthlyBill.find({
+      tenantId: tenant._id,
+      billDate: { $gte: cutoff8Years },
+    })
       .sort({ billDate: -1, createdAt: -1 })
       .lean();
+
+    // Enforce 12-month retention on meter photos (hide photos older than 12 months)
+    const bills = rawBills.map((b) => {
+      const isPhotoExpired = new Date(b.billDate || b.createdAt) < cutoff12Months;
+      return {
+        ...b,
+        meterPhotoUrl: isPhotoExpired ? '' : b.meterPhotoUrl,
+      };
+    });
 
     let pendingRent = 0;
     let pendingElectricity = 0;

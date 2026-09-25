@@ -1,5 +1,6 @@
 const MonthlyBill = require('../models/MonthlyBill');
 const Tenant = require('../models/Tenant');
+const { purgeExpiredData, runCleanupThrottled } = require('../utils/cleanupService');
 
 // @desc    Create new monthly bill (Room Rent + Electricity)
 // @route   POST /api/bills
@@ -16,6 +17,7 @@ exports.createBill = async (req, res) => {
       ratePerUnit = 11,
       electricityStatus = 'Pending',
       meterPhotoUrl = '',
+      meterPhotoPublicId = '',
       notes = '',
     } = req.body;
 
@@ -57,6 +59,7 @@ exports.createBill = async (req, res) => {
       electricityStatus,
       electricityPaidDate: electricityStatus === 'Paid' ? new Date() : null,
       meterPhotoUrl,
+      meterPhotoPublicId,
       totalDue,
       isFullyPaid: roomRentStatus === 'Paid' && electricityStatus === 'Paid',
       notes,
@@ -65,6 +68,9 @@ exports.createBill = async (req, res) => {
     // Update tenant's latest reading
     tenant.latestReading = curr;
     await tenant.save();
+
+    // Trigger throttled background data retention cleanup
+    runCleanupThrottled();
 
     res.status(201).json(bill);
   } catch (error) {
@@ -110,6 +116,18 @@ exports.deleteBill = async (req, res) => {
     await bill.deleteOne();
     res.json({ success: true, message: 'Bill removed' });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// @desc    Enforce retention rules (Purge >8 yrs bills & >12 mos photos)
+// @route   POST /api/bills/cleanup or /api/cleanup
+exports.cleanExpiredData = async (req, res) => {
+  try {
+    const report = await purgeExpiredData();
+    res.json(report);
+  } catch (error) {
+    console.error('Manual cleanup error:', error);
     res.status(500).json({ error: error.message });
   }
 };

@@ -100,8 +100,16 @@ exports.syncOfflineData = async (req, res) => {
       }
     }
 
-    // 3. Sync Monthly Bills
+    // 3. Sync Monthly Bills (enforcing 8-year retention policy)
+    const cutoff8Years = new Date();
+    cutoff8Years.setFullYear(cutoff8Years.getFullYear() - 8);
+
     for (const b of bills) {
+      const billDateObj = b.billDate ? new Date(b.billDate) : new Date();
+      if (billDateObj < cutoff8Years) {
+        continue; // Skip syncing bills older than 8 years
+      }
+
       let targetTenantId = idMap.tenants[b.tenantId || b.localTenantId];
       if (!targetTenantId && mongoose.isValidObjectId(b.tenantId)) {
         targetTenantId = b.tenantId;
@@ -129,7 +137,7 @@ exports.syncOfflineData = async (req, res) => {
             tenantId: targetTenantId,
             roomId: targetRoomId,
             monthYear: b.monthYear,
-            billDate: b.billDate || new Date(),
+            billDate: billDateObj,
             roomRentAmount: Number(b.roomRentAmount) || 0,
             roomRentStatus: b.roomRentStatus || 'Pending',
             previousReading: Number(b.previousReading) || 0,
@@ -139,6 +147,7 @@ exports.syncOfflineData = async (req, res) => {
             electricityAmount: Number(b.electricityAmount) || 0,
             electricityStatus: b.electricityStatus || 'Pending',
             meterPhotoUrl: b.meterPhotoUrl || '',
+            meterPhotoPublicId: b.meterPhotoPublicId || '',
             totalDue: Number(b.totalDue) || 0,
             isFullyPaid: b.roomRentStatus === 'Paid' && b.electricityStatus === 'Paid',
             notes: b.notes || '',

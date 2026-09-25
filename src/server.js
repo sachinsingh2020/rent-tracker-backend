@@ -55,6 +55,7 @@ app.use('/api/bills', require('./routes/billRoutes'));
 app.use('/api/settings', require('./routes/settingRoutes'));
 app.use('/api/upload', require('./routes/uploadRoutes'));
 app.use('/api/sync', require('./routes/syncRoutes'));
+app.all('/api/cleanup', require('./controllers/billController').cleanExpiredData);
 
 // 404 handler for unknown routes
 app.use((req, res) => {

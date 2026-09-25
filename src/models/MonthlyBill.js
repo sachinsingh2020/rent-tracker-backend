@@ -74,6 +74,10 @@ const MonthlyBillSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    meterPhotoPublicId: {
+      type: String,
+      default: '',
+    },
 
     // 💰 Totals
     totalDue: {
@@ -91,6 +95,10 @@ const MonthlyBillSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Optimize retention queries and tenant billing history
+MonthlyBillSchema.index({ billDate: 1 });
+MonthlyBillSchema.index({ tenantId: 1, billDate: -1 });
 
 // Auto-update isFullyPaid before save
 MonthlyBillSchema.pre('save', function (next) {
