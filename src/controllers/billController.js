@@ -25,7 +25,8 @@ exports.createBill = async (req, res) => {
       return res.status(400).json({ error: 'Tenant is required' });
     }
 
-    const tenant = await Tenant.findById(tenantId);
+    const userQuery = req.user ? { userId: req.user._id } : {};
+    const tenant = await Tenant.findOne({ _id: tenantId, ...userQuery });
     if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
 
     const prev = Number(previousReading) ?? Number(tenant.latestReading) ?? Number(tenant.initialReading) ?? 0;
@@ -44,6 +45,7 @@ exports.createBill = async (req, res) => {
     const totalDue = Math.round((rent + electricityAmount) * 100) / 100;
 
     const bill = await MonthlyBill.create({
+      userId: req.user ? req.user._id : null,
       tenantId,
       roomId: tenant.roomId,
       monthYear: monthYear || new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' }),
@@ -82,8 +84,9 @@ exports.createBill = async (req, res) => {
 // @route   PATCH /api/bills/:id/payment
 exports.updatePaymentStatus = async (req, res) => {
   try {
+    const userQuery = req.user ? { userId: req.user._id } : {};
     const { roomRentStatus, electricityStatus } = req.body;
-    const bill = await MonthlyBill.findById(req.params.id);
+    const bill = await MonthlyBill.findOne({ _id: req.params.id, ...userQuery });
 
     if (!bill) return res.status(404).json({ error: 'Bill record not found' });
 
@@ -110,7 +113,8 @@ exports.updatePaymentStatus = async (req, res) => {
 // @route   DELETE /api/bills/:id
 exports.deleteBill = async (req, res) => {
   try {
-    const bill = await MonthlyBill.findById(req.params.id);
+    const userQuery = req.user ? { userId: req.user._id } : {};
+    const bill = await MonthlyBill.findOne({ _id: req.params.id, ...userQuery });
     if (!bill) return res.status(404).json({ error: 'Bill record not found' });
 
     const tenantId = bill.tenantId;
@@ -118,8 +122,8 @@ exports.deleteBill = async (req, res) => {
 
     // Recalculate tenant's latestReading based on remaining bills or initialReading
     if (tenantId) {
-      const remainingBills = await MonthlyBill.find({ tenantId }).sort({ billDate: -1, createdAt: -1 });
-      const tenant = await Tenant.findById(tenantId);
+      const remainingBills = await MonthlyBill.find({ tenantId, ...userQuery }).sort({ billDate: -1, createdAt: -1 });
+      const tenant = await Tenant.findOne({ _id: tenantId, ...userQuery });
       if (tenant) {
         if (remainingBills.length > 0) {
           tenant.latestReading = remainingBills[0].currentReading;

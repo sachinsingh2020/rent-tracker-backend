@@ -4,10 +4,14 @@ const Setting = require('../models/Setting');
 // @route   GET /api/settings
 exports.getSettings = async (req, res) => {
   try {
-    let setting = await Setting.findOne({ key: 'global_defaults' });
+    const userId = req.user ? req.user._id : null;
+    const settingQuery = userId ? { userId } : { key: 'global_defaults' };
+
+    let setting = await Setting.findOne(settingQuery);
     if (!setting) {
       setting = await Setting.create({
-        key: 'global_defaults',
+        userId,
+        key: userId ? `user_${userId}` : 'global_defaults',
         defaultElectricityRate: Number(process.env.DEFAULT_ELECTRICITY_RATE) || 11.0,
         defaultRoomRent: Number(process.env.DEFAULT_ROOM_RENT) || 6000.0,
       });
@@ -22,11 +26,16 @@ exports.getSettings = async (req, res) => {
 // @route   PUT /api/settings
 exports.updateSettings = async (req, res) => {
   try {
+    const userId = req.user ? req.user._id : null;
+    const settingQuery = userId ? { userId } : { key: 'global_defaults' };
     const { defaultElectricityRate, defaultRoomRent, ownerName, upiId } = req.body;
 
-    let setting = await Setting.findOne({ key: 'global_defaults' });
+    let setting = await Setting.findOne(settingQuery);
     if (!setting) {
-      setting = new Setting({ key: 'global_defaults' });
+      setting = new Setting({
+        userId,
+        key: userId ? `user_${userId}` : 'global_defaults',
+      });
     }
 
     if (defaultElectricityRate !== undefined) {

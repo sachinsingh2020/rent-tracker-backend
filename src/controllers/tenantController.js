@@ -6,7 +6,8 @@ const MonthlyBill = require('../models/MonthlyBill');
 // @route   GET /api/tenants
 exports.getTenants = async (req, res) => {
   try {
-    const tenants = await Tenant.find()
+    const userQuery = req.user ? { userId: req.user._id } : {};
+    const tenants = await Tenant.find(userQuery)
       .populate('roomId', 'roomNumber floor defaultRent')
       .sort({ createdAt: -1 })
       .lean();
@@ -20,6 +21,7 @@ exports.getTenants = async (req, res) => {
         const bills = await MonthlyBill.find({
           tenantId: tenant._id,
           billDate: { $gte: cutoff8Years },
+          ...userQuery,
         }).lean();
 
         let pendingRent = 0;
@@ -54,7 +56,8 @@ exports.getTenants = async (req, res) => {
 // @route   GET /api/tenants/:id
 exports.getTenantById = async (req, res) => {
   try {
-    const tenant = await Tenant.findById(req.params.id)
+    const userQuery = req.user ? { userId: req.user._id } : {};
+    const tenant = await Tenant.findOne({ _id: req.params.id, ...userQuery })
       .populate('roomId', 'roomNumber floor defaultRent')
       .lean();
 
@@ -128,10 +131,12 @@ exports.createTenant = async (req, res) => {
       return res.status(400).json({ error: 'Tenant name and room are required' });
     }
 
-    const room = await Room.findById(roomId);
+    const userQuery = req.user ? { userId: req.user._id } : {};
+    const room = await Room.findOne({ _id: roomId, ...userQuery });
     if (!room) return res.status(404).json({ error: 'Selected room not found' });
 
     const tenant = await Tenant.create({
+      userId: req.user ? req.user._id : null,
       name,
       phone,
       email,
@@ -162,7 +167,8 @@ exports.createTenant = async (req, res) => {
 // @route   PUT /api/tenants/:id
 exports.updateTenant = async (req, res) => {
   try {
-    const tenant = await Tenant.findByIdAndUpdate(req.params.id, req.body, {
+    const userQuery = req.user ? { userId: req.user._id } : {};
+    const tenant = await Tenant.findOneAndUpdate({ _id: req.params.id, ...userQuery }, req.body, {
       new: true,
       runValidators: true,
     });
@@ -177,16 +183,17 @@ exports.updateTenant = async (req, res) => {
 // @route   POST /api/tenants/:id/vacate
 exports.vacateTenant = async (req, res) => {
   try {
-    const tenant = await Tenant.findById(req.params.id);
+    const userQuery = req.user ? { userId: req.user._id } : {};
+    const tenant = await Tenant.findOne({ _id: req.params.id, ...userQuery });
     if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
 
     tenant.status = 'Vacated';
     await tenant.save();
 
     // Check if any other active tenant in the same room
-    const otherActive = await Tenant.findOne({ roomId: tenant.roomId, status: 'Active' });
+    const otherActive = await Tenant.findOne({ roomId: tenant.roomId, status: 'Active', ...userQuery });
     if (!otherActive) {
-      await Room.findByIdAndUpdate(tenant.roomId, { status: 'Available' });
+      await Room.findOneAndUpdate({ _id: tenant.roomId, ...userQuery }, { status: 'Available' });
     }
 
     res.json({ success: true, message: 'Tenant marked as vacated' });

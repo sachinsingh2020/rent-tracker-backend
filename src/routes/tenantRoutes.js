@@ -7,6 +7,9 @@ const {
   updateTenant,
   vacateTenant,
 } = require('../controllers/tenantController');
+const { optionalAuth } = require('../middleware/auth');
+
+router.use(optionalAuth);
 
 router.route('/').get(getTenants).post(createTenant);
 router.route('/:id').get(getTenantById).put(updateTenant);

@@ -5,7 +5,8 @@ const Tenant = require('../models/Tenant');
 // @route   GET /api/rooms
 exports.getRooms = async (req, res) => {
   try {
-    const rooms = await Room.find().sort({ roomNumber: 1 }).lean();
+    const userQuery = req.user ? { userId: req.user._id } : {};
+    const rooms = await Room.find(userQuery).sort({ roomNumber: 1 }).lean();
 
     // Attach active tenant info to each room
     const enrichedRooms = await Promise.all(
@@ -13,6 +14,7 @@ exports.getRooms = async (req, res) => {
         const activeTenant = await Tenant.findOne({
           roomId: room._id,
           status: 'Active',
+          ...userQuery,
         })
           .sort({ updatedAt: -1, createdAt: -1 })
           .select('name phone photoUrl negotiatedRent latestReading initialReading moveInDate');
@@ -40,6 +42,7 @@ exports.createRoom = async (req, res) => {
     }
 
     const room = await Room.create({
+      userId: req.user ? req.user._id : null,
       roomNumber,
       floor: floor || 'Ground Floor',
       defaultRent: Number(defaultRent) || 6000,
@@ -56,10 +59,12 @@ exports.createRoom = async (req, res) => {
 // @route   PUT /api/rooms/:id
 exports.updateRoom = async (req, res) => {
   try {
-    const room = await Room.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    });
+    const userQuery = req.user ? { userId: req.user._id } : {};
+    const room = await Room.findOneAndUpdate(
+      { _id: req.params.id, ...userQuery },
+      req.body,
+      { new: true, runValidators: true }
+    );
     if (!room) return res.status(404).json({ error: 'Room not found' });
     res.json(room);
   } catch (error) {
@@ -71,13 +76,14 @@ exports.updateRoom = async (req, res) => {
 // @route   DELETE /api/rooms/:id
 exports.deleteRoom = async (req, res) => {
   try {
-    const room = await Room.findById(req.params.id);
+    const userQuery = req.user ? { userId: req.user._id } : {};
+    const room = await Room.findOne({ _id: req.params.id, ...userQuery });
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
     // Clean up all associated tenants and bills of this room
     const MonthlyBill = require('../models/MonthlyBill');
-    await Tenant.deleteMany({ roomId: room._id });
-    await MonthlyBill.deleteMany({ roomId: room._id });
+    await Tenant.deleteMany({ roomId: room._id, ...userQuery });
+    await MonthlyBill.deleteMany({ roomId: room._id, ...userQuery });
 
     await room.deleteOne();
     res.json({ success: true, message: 'Room and its associated records removed successfully.' });

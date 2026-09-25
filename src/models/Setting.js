@@ -2,10 +2,14 @@ const mongoose = require('mongoose');
 
 const SettingSchema = new mongoose.Schema(
   {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      index: true,
+    },
     key: {
       type: String,
       required: true,
-      unique: true,
       default: 'global_defaults',
     },
     defaultElectricityRate: {

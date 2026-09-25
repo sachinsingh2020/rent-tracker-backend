@@ -2,6 +2,11 @@ const mongoose = require('mongoose');
 
 const RoomSchema = new mongoose.Schema(
   {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      index: true,
+    },
     roomNumber: {
       type: String,
       required: [true, 'Room number is required'],

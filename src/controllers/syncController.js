@@ -15,20 +15,23 @@ const normalizePhone = (phone) => {
 exports.syncOfflineData = async (req, res) => {
   try {
     const { rooms = [], tenants = [], bills = [], settings = {}, overwriteCloud = false } = req.body;
+    const userId = req.user ? req.user._id : null;
+    const userQuery = userId ? { userId } : {};
 
     const idMap = {
       rooms: {},
       tenants: {},
     };
 
-    // If overwriteCloud is requested, completely wipe cloud database and mirror offline SQLite
+    // If overwriteCloud is requested, completely wipe THIS USER's cloud database and mirror offline SQLite
     if (overwriteCloud) {
-      await MonthlyBill.deleteMany({});
-      await Tenant.deleteMany({});
-      await Room.deleteMany({});
+      await MonthlyBill.deleteMany(userQuery);
+      await Tenant.deleteMany(userQuery);
+      await Room.deleteMany(userQuery);
 
       for (const r of rooms) {
         const roomDoc = await Room.create({
+          userId,
           roomNumber: String(r.roomNumber).trim(),
           floor: r.floor || 'Ground Floor',
           defaultRent: Number(r.defaultRent) || 6000,
@@ -46,12 +49,13 @@ exports.syncOfflineData = async (req, res) => {
           targetRoomId = idMap.rooms[t.room.roomNumber];
         }
         if (!targetRoomId) {
-          const firstRoom = await Room.findOne();
+          const firstRoom = await Room.findOne(userQuery);
           if (firstRoom) targetRoomId = firstRoom._id;
         }
 
         if (targetRoomId && t.name) {
           const tenantDoc = await Tenant.create({
+            userId,
             name: t.name.trim(),
             phone: t.phone || '',
             email: t.email || '',
@@ -80,6 +84,7 @@ exports.syncOfflineData = async (req, res) => {
 
         if (targetTenantId && targetRoomId) {
           await MonthlyBill.create({
+            userId,
             tenantId: targetTenantId,
             roomId: targetRoomId,
             monthYear: b.monthYear,
@@ -103,8 +108,10 @@ exports.syncOfflineData = async (req, res) => {
 
       if (settings && (settings.defaultElectricityRate || settings.defaultRoomRent || settings.ownerName || settings.upiId)) {
         await Setting.findOneAndUpdate(
-          { key: 'global_defaults' },
+          userId ? { userId } : { key: 'global_defaults' },
           {
+            userId,
+            key: userId ? `user_${userId}` : 'global_defaults',
             defaultElectricityRate: Number(settings.defaultElectricityRate) || 11,
             defaultRoomRent: Number(settings.defaultRoomRent) || 6000,
             ownerName: String(settings.ownerName || '').trim(),
@@ -116,13 +123,13 @@ exports.syncOfflineData = async (req, res) => {
 
       return res.json({
         success: true,
-        message: 'Cloud data completely overwritten with offline data',
+        message: 'Email cloud data completely overwritten with offline data',
         idMap,
       });
     }
 
-    const existingTenantCount = await Tenant.countDocuments();
-    const existingRoomCount = await Room.countDocuments();
+    const existingTenantCount = await Tenant.countDocuments(userQuery);
+    const existingRoomCount = await Room.countDocuments(userQuery);
     const cloudHasRealData = existingTenantCount > 0 || existingRoomCount > 0;
 
     // Filter out dummy starter placeholder seed if cloud already contains real data
@@ -143,7 +150,7 @@ exports.syncOfflineData = async (req, res) => {
     // 1. Sync Rooms (Handle room number conflicts gracefully)
     for (const r of rooms) {
       if (cloudHasRealData && (r.id === 'room_101' || r.id === 'room_102') && r.notes === 'Corner room with balcony') {
-        const existingSameRoom = await Room.findOne({ roomNumber: String(r.roomNumber).trim() });
+        const existingSameRoom = await Room.findOne({ roomNumber: String(r.roomNumber).trim(), ...userQuery });
         if (existingSameRoom) {
           idMap.rooms[r.id] = existingSameRoom._id;
           idMap.rooms[r.roomNumber] = existingSameRoom._id;
@@ -153,10 +160,10 @@ exports.syncOfflineData = async (req, res) => {
 
       let roomDoc;
       if (r.cloudId && mongoose.isValidObjectId(r.cloudId)) {
-        roomDoc = await Room.findById(r.cloudId);
+        roomDoc = await Room.findOne({ _id: r.cloudId, ...userQuery });
       }
       if (!roomDoc && r.roomNumber) {
-        roomDoc = await Room.findOne({ roomNumber: String(r.roomNumber).trim() });
+        roomDoc = await Room.findOne({ roomNumber: String(r.roomNumber).trim(), ...userQuery });
       }
 
       if (roomDoc) {
@@ -171,6 +178,7 @@ exports.syncOfflineData = async (req, res) => {
         await roomDoc.save();
       } else {
         roomDoc = await Room.create({
+          userId,
           roomNumber: String(r.roomNumber).trim(),
           floor: r.floor || 'Ground Floor',
           defaultRent: Number(r.defaultRent) || 6000,
@@ -188,20 +196,20 @@ exports.syncOfflineData = async (req, res) => {
       let tenantDoc = null;
       const cleanPhone = normalizePhone(t.phone);
 
-      // Priority 1: Match by normalized 10-digit phone number across all database tenants
+      // Priority 1: Match by normalized 10-digit phone number across this user's database tenants
       if (cleanPhone && cleanPhone.length === 10) {
-        const allTenantsInDb = await Tenant.find();
+        const allTenantsInDb = await Tenant.find(userQuery);
         tenantDoc = allTenantsInDb.find((dbT) => normalizePhone(dbT.phone) === cleanPhone);
       }
 
       // Priority 2: Match by cloudId if valid ObjectId
       if (!tenantDoc && t.cloudId && mongoose.isValidObjectId(t.cloudId)) {
-        tenantDoc = await Tenant.findById(t.cloudId);
+        tenantDoc = await Tenant.findOne({ _id: t.cloudId, ...userQuery });
       }
 
       // Priority 3: Fallback to exact name match ONLY IF phone number is absent
       if (!tenantDoc && !cleanPhone && t.name) {
-        tenantDoc = await Tenant.findOne({ name: t.name.trim() });
+        tenantDoc = await Tenant.findOne({ name: t.name.trim(), ...userQuery });
       }
 
       // Resolve target room
@@ -216,7 +224,7 @@ exports.syncOfflineData = async (req, res) => {
         targetRoomId = tenantDoc.roomId;
       }
       if (!targetRoomId) {
-        const anyRoom = await Room.findOne();
+        const anyRoom = await Room.findOne(userQuery);
         if (anyRoom) targetRoomId = anyRoom._id;
       }
 
@@ -245,6 +253,7 @@ exports.syncOfflineData = async (req, res) => {
       } else if (targetRoomId && t.name) {
         // Brand new tenant from offline device
         tenantDoc = await Tenant.create({
+          userId,
           name: t.name.trim(),
           phone: t.phone || '',
           email: t.email || '',
@@ -270,13 +279,13 @@ exports.syncOfflineData = async (req, res) => {
       }
     }
 
-    // 3. Resolve Room Conflicts & Reconcile Room Occupancy Status
-    // Ensures occupied count NEVER exceeds room count (no 4/2 bug)
-    const allRooms = await Room.find();
+    // 3. Resolve Room Conflicts & Reconcile Room Occupancy Status for this user
+    const allRooms = await Room.find(userQuery);
     for (const r of allRooms) {
       const activeTenantsInRoom = await Tenant.find({
         roomId: r._id,
         status: 'Active',
+        ...userQuery,
       }).sort({ updatedAt: -1, moveInDate: -1, createdAt: -1 });
 
       if (activeTenantsInRoom.length === 0) {
@@ -286,8 +295,6 @@ exports.syncOfflineData = async (req, res) => {
         r.status = 'Occupied';
         await r.save();
       } else {
-        // Room Conflict: Multiple active tenants assigned to the same room
-        // The newest active tenant stays Active, others are set to Vacated
         const [keepActive, ...conflicts] = activeTenantsInRoom;
         r.status = 'Occupied';
         await r.save();
@@ -322,17 +329,19 @@ exports.syncOfflineData = async (req, res) => {
       if (targetTenantId && targetRoomId) {
         let billDoc;
         if (b.cloudId && mongoose.isValidObjectId(b.cloudId)) {
-          billDoc = await MonthlyBill.findById(b.cloudId);
+          billDoc = await MonthlyBill.findOne({ _id: b.cloudId, ...userQuery });
         }
         if (!billDoc) {
           billDoc = await MonthlyBill.findOne({
             tenantId: targetTenantId,
             monthYear: b.monthYear,
+            ...userQuery,
           });
         }
 
         if (!billDoc) {
           await MonthlyBill.create({
+            userId,
             tenantId: targetTenantId,
             roomId: targetRoomId,
             monthYear: b.monthYear,
@@ -379,8 +388,10 @@ exports.syncOfflineData = async (req, res) => {
     // 5. Sync Settings
     if (settings && (settings.defaultElectricityRate || settings.defaultRoomRent || settings.ownerName || settings.upiId)) {
       await Setting.findOneAndUpdate(
-        { key: 'global_defaults' },
+        userId ? { userId } : { key: 'global_defaults' },
         {
+          userId,
+          key: userId ? `user_${userId}` : 'global_defaults',
           defaultElectricityRate: Number(settings.defaultElectricityRate) || 11,
           defaultRoomRent: Number(settings.defaultRoomRent) || 6000,
           ownerName: String(settings.ownerName || '').trim(),
@@ -405,9 +416,12 @@ exports.syncOfflineData = async (req, res) => {
 // @route   GET /api/sync/status
 exports.getSyncStatus = async (req, res) => {
   try {
-    const roomsCount = await Room.countDocuments();
-    const tenantsCount = await Tenant.countDocuments();
-    const billsCount = await MonthlyBill.countDocuments();
+    const userId = req.user ? req.user._id : null;
+    const userQuery = userId ? { userId } : {};
+
+    const roomsCount = await Room.countDocuments(userQuery);
+    const tenantsCount = await Tenant.countDocuments(userQuery);
+    const billsCount = await MonthlyBill.countDocuments(userQuery);
 
     res.json({
       hasData: roomsCount > 0 || tenantsCount > 0 || billsCount > 0,
@@ -424,15 +438,18 @@ exports.getSyncStatus = async (req, res) => {
 // @route   GET /api/sync/export
 exports.getExportData = async (req, res) => {
   try {
+    const userId = req.user ? req.user._id : null;
+    const userQuery = userId ? { userId } : {};
+
     const cutoff8Years = new Date();
     cutoff8Years.setFullYear(cutoff8Years.getFullYear() - 8);
 
     const cutoff12Months = new Date();
     cutoff12Months.setMonth(cutoff12Months.getMonth() - 12);
 
-    const rooms = await Room.find().sort({ roomNumber: 1 }).lean();
-    const tenants = await Tenant.find().lean();
-    const rawBills = await MonthlyBill.find({ billDate: { $gte: cutoff8Years } })
+    const rooms = await Room.find(userQuery).sort({ roomNumber: 1 }).lean();
+    const tenants = await Tenant.find(userQuery).lean();
+    const rawBills = await MonthlyBill.find({ ...userQuery, billDate: { $gte: cutoff8Years } })
       .sort({ billDate: -1, createdAt: -1 })
       .lean();
 
@@ -441,7 +458,7 @@ exports.getExportData = async (req, res) => {
       meterPhotoUrl: new Date(b.billDate || b.createdAt) < cutoff12Months ? '' : b.meterPhotoUrl,
     }));
 
-    const settingDoc = await Setting.findOne({ key: 'global_defaults' }).lean();
+    const settingDoc = await Setting.findOne(userId ? { userId } : { key: 'global_defaults' }).lean();
 
     res.json({
       rooms,

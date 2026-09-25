@@ -6,6 +6,9 @@ const {
   deleteBill,
   cleanExpiredData,
 } = require('../controllers/billController');
+const { optionalAuth } = require('../middleware/auth');
+
+router.use(optionalAuth);
 
 router.post('/', createBill);
 router.all('/cleanup', cleanExpiredData);
