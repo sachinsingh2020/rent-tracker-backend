@@ -28,6 +28,10 @@ const SettingSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    defaultReadingDay: {
+      type: Number,
+      default: 1,
+    },
   },
   { timestamps: true }
 );

@@ -67,6 +67,10 @@ const TenantSchema = new mongoose.Schema(
       enum: ['Active', 'Vacated'],
       default: 'Active',
     },
+    readingDay: {
+      type: Number,
+      default: 1,
+    },
     notes: {
       type: String,
       trim: true,

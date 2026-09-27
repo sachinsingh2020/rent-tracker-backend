@@ -68,6 +68,7 @@ exports.syncOfflineData = async (req, res) => {
             initialReading: Number(t.initialReading) || 0,
             latestReading: Number(t.latestReading) || Number(t.initialReading) || 0,
             moveInDate: t.moveInDate || new Date(),
+            readingDay: Number(t.readingDay) || 1,
             status: t.status || 'Active',
             notes: t.notes || '',
           });
@@ -106,7 +107,7 @@ exports.syncOfflineData = async (req, res) => {
         }
       }
 
-      if (settings && (settings.defaultElectricityRate || settings.defaultRoomRent || settings.ownerName || settings.upiId)) {
+      if (settings && (settings.defaultElectricityRate || settings.defaultRoomRent || settings.ownerName || settings.upiId || settings.defaultReadingDay)) {
         await Setting.findOneAndUpdate(
           userId ? { userId } : { key: 'global_defaults' },
           {
@@ -116,6 +117,7 @@ exports.syncOfflineData = async (req, res) => {
             defaultRoomRent: Number(settings.defaultRoomRent) || 6000,
             ownerName: String(settings.ownerName || '').trim(),
             upiId: String(settings.upiId || '').trim(),
+            defaultReadingDay: Number(settings.defaultReadingDay) || 1,
           },
           { upsert: true, new: true }
         );
@@ -243,6 +245,7 @@ exports.syncOfflineData = async (req, res) => {
           Number(tenantDoc.latestReading) || 0,
           Number(t.latestReading) || 0
         );
+        tenantDoc.readingDay = Number(t.readingDay) || tenantDoc.readingDay || 1;
         if (t.status === 'Active' || tenantDoc.status === 'Active') {
           tenantDoc.status = 'Active';
         }
@@ -266,6 +269,7 @@ exports.syncOfflineData = async (req, res) => {
           initialReading: Number(t.initialReading) || 0,
           latestReading: Number(t.latestReading) || Number(t.initialReading) || 0,
           moveInDate: t.moveInDate || new Date(),
+          readingDay: Number(t.readingDay) || 1,
           status: t.status || 'Active',
           notes: t.notes || '',
         });
@@ -386,7 +390,7 @@ exports.syncOfflineData = async (req, res) => {
     }
 
     // 5. Sync Settings
-    if (settings && (settings.defaultElectricityRate || settings.defaultRoomRent || settings.ownerName || settings.upiId)) {
+    if (settings && (settings.defaultElectricityRate || settings.defaultRoomRent || settings.ownerName || settings.upiId || settings.defaultReadingDay)) {
       await Setting.findOneAndUpdate(
         userId ? { userId } : { key: 'global_defaults' },
         {
@@ -396,6 +400,7 @@ exports.syncOfflineData = async (req, res) => {
           defaultRoomRent: Number(settings.defaultRoomRent) || 6000,
           ownerName: String(settings.ownerName || '').trim(),
           upiId: String(settings.upiId || '').trim(),
+          defaultReadingDay: Number(settings.defaultReadingDay) || 1,
         },
         { upsert: true, new: true }
       );
@@ -470,8 +475,9 @@ exports.getExportData = async (req, res) => {
             defaultRoomRent: settingDoc.defaultRoomRent || 6000,
             ownerName: settingDoc.ownerName || '',
             upiId: settingDoc.upiId || '',
+            defaultReadingDay: settingDoc.defaultReadingDay || 1,
           }
-        : { defaultElectricityRate: 11, defaultRoomRent: 6000, ownerName: '', upiId: '' },
+        : { defaultElectricityRate: 11, defaultRoomRent: 6000, ownerName: '', upiId: '', defaultReadingDay: 1 },
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

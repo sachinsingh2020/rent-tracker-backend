@@ -149,6 +149,7 @@ exports.createTenant = async (req, res) => {
       initialReading: Number(initialReading) || 0,
       latestReading: Number(initialReading) || 0,
       moveInDate: moveInDate || new Date(),
+      readingDay: Number(req.body.readingDay) || 1,
       status: 'Active',
       notes,
     });
