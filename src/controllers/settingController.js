@@ -14,6 +14,10 @@ exports.getSettings = async (req, res) => {
         key: userId ? `user_${userId}` : 'global_defaults',
         defaultElectricityRate: Number(process.env.DEFAULT_ELECTRICITY_RATE) || 11.0,
         defaultRoomRent: Number(process.env.DEFAULT_ROOM_RENT) || 6000.0,
+        ownerName: '',
+        upiId: '',
+        defaultReadingDay: 1,
+        defaultReadingTime: '09:00',
       });
     }
     res.json(setting);
@@ -28,7 +32,7 @@ exports.updateSettings = async (req, res) => {
   try {
     const userId = req.user ? req.user._id : null;
     const settingQuery = userId ? { userId } : { key: 'global_defaults' };
-    const { defaultElectricityRate, defaultRoomRent, ownerName, upiId } = req.body;
+    const { defaultElectricityRate, defaultRoomRent, ownerName, upiId, defaultReadingDay, defaultReadingTime } = req.body;
 
     let setting = await Setting.findOne(settingQuery);
     if (!setting) {
@@ -49,6 +53,12 @@ exports.updateSettings = async (req, res) => {
     }
     if (upiId !== undefined) {
       setting.upiId = String(upiId).trim();
+    }
+    if (defaultReadingDay !== undefined) {
+      setting.defaultReadingDay = Number(defaultReadingDay) || 1;
+    }
+    if (defaultReadingTime !== undefined) {
+      setting.defaultReadingTime = String(defaultReadingTime).trim() || '09:00';
     }
 
     await setting.save();
