@@ -32,6 +32,10 @@ const SettingSchema = new mongoose.Schema(
       type: Number,
       default: 1,
     },
+    defaultReadingTime: {
+      type: String,
+      default: '09:00',
+    },
   },
   { timestamps: true }
 );

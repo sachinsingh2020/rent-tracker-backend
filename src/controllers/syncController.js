@@ -107,7 +107,7 @@ exports.syncOfflineData = async (req, res) => {
         }
       }
 
-      if (settings && (settings.defaultElectricityRate || settings.defaultRoomRent || settings.ownerName || settings.upiId || settings.defaultReadingDay)) {
+      if (settings && (settings.defaultElectricityRate || settings.defaultRoomRent || settings.ownerName || settings.upiId || settings.defaultReadingDay || settings.defaultReadingTime)) {
         await Setting.findOneAndUpdate(
           userId ? { userId } : { key: 'global_defaults' },
           {
@@ -118,6 +118,7 @@ exports.syncOfflineData = async (req, res) => {
             ownerName: String(settings.ownerName || '').trim(),
             upiId: String(settings.upiId || '').trim(),
             defaultReadingDay: Number(settings.defaultReadingDay) || 1,
+            defaultReadingTime: String(settings.defaultReadingTime || '09:00').trim(),
           },
           { upsert: true, new: true }
         );
@@ -390,7 +391,7 @@ exports.syncOfflineData = async (req, res) => {
     }
 
     // 5. Sync Settings
-    if (settings && (settings.defaultElectricityRate || settings.defaultRoomRent || settings.ownerName || settings.upiId || settings.defaultReadingDay)) {
+    if (settings && (settings.defaultElectricityRate || settings.defaultRoomRent || settings.ownerName || settings.upiId || settings.defaultReadingDay || settings.defaultReadingTime)) {
       await Setting.findOneAndUpdate(
         userId ? { userId } : { key: 'global_defaults' },
         {
@@ -401,6 +402,7 @@ exports.syncOfflineData = async (req, res) => {
           ownerName: String(settings.ownerName || '').trim(),
           upiId: String(settings.upiId || '').trim(),
           defaultReadingDay: Number(settings.defaultReadingDay) || 1,
+          defaultReadingTime: String(settings.defaultReadingTime || '09:00').trim(),
         },
         { upsert: true, new: true }
       );
@@ -476,8 +478,9 @@ exports.getExportData = async (req, res) => {
             ownerName: settingDoc.ownerName || '',
             upiId: settingDoc.upiId || '',
             defaultReadingDay: settingDoc.defaultReadingDay || 1,
+            defaultReadingTime: settingDoc.defaultReadingTime || '09:00',
           }
-        : { defaultElectricityRate: 11, defaultRoomRent: 6000, ownerName: '', upiId: '', defaultReadingDay: 1 },
+        : { defaultElectricityRate: 11, defaultRoomRent: 6000, ownerName: '', upiId: '', defaultReadingDay: 1, defaultReadingTime: '09:00' },
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
