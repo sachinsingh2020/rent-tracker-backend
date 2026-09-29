@@ -5,6 +5,7 @@ const {
   getTenantById,
   createTenant,
   updateTenant,
+  deleteTenant,
   vacateTenant,
 } = require('../controllers/tenantController');
 const { optionalAuth } = require('../middleware/auth');
@@ -12,7 +13,7 @@ const { optionalAuth } = require('../middleware/auth');
 router.use(optionalAuth);
 
 router.route('/').get(getTenants).post(createTenant);
-router.route('/:id').get(getTenantById).put(updateTenant);
+router.route('/:id').get(getTenantById).put(updateTenant).delete(deleteTenant);
 router.route('/:id/vacate').post(vacateTenant);
 
 module.exports = router;

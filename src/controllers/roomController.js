@@ -41,11 +41,22 @@ exports.createRoom = async (req, res) => {
       return res.status(400).json({ error: 'Room number is required' });
     }
 
+    const userQuery = req.user ? { userId: req.user._id } : {};
+    const cleanRoomNum = String(roomNumber).trim();
+
+    const existing = await Room.findOne({ roomNumber: cleanRoomNum, ...userQuery });
+    if (existing) {
+      if (floor) existing.floor = floor;
+      if (notes) existing.notes = notes;
+      await existing.save();
+      return res.status(200).json(existing);
+    }
+
     const room = await Room.create({
       userId: req.user ? req.user._id : null,
-      roomNumber,
+      roomNumber: cleanRoomNum,
       floor: floor || 'Ground Floor',
-      defaultRent: Number(defaultRent) || 6000,
+      defaultRent: Number(defaultRent) || 0,
       notes,
     });
 

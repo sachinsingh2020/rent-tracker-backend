@@ -112,13 +112,14 @@ exports.getTenantById = async (req, res) => {
 // @route   POST /api/tenants
 exports.createTenant = async (req, res) => {
   try {
-    const {
+    let {
       name,
       phone,
       email,
       photoUrl,
       photoPublicId,
       roomId,
+      roomNumber,
       negotiatedRent,
       securityDeposit,
       meterNumber,
@@ -127,11 +128,32 @@ exports.createTenant = async (req, res) => {
       notes,
     } = req.body;
 
-    if (!name || !roomId) {
-      return res.status(400).json({ error: 'Tenant name and room are required' });
+    if (!name) {
+      return res.status(400).json({ error: 'Tenant name is required' });
     }
 
     const userQuery = req.user ? { userId: req.user._id } : {};
+
+    // Auto-resolve or create room if roomId is not provided
+    if (!roomId && (roomNumber || req.body.room)) {
+      const targetRoomNum = String(roomNumber || req.body.room).trim();
+      let room = await Room.findOne({ roomNumber: targetRoomNum, ...userQuery });
+      if (!room) {
+        room = await Room.create({
+          userId: req.user ? req.user._id : null,
+          roomNumber: targetRoomNum,
+          floor: req.body.floor || 'Ground Floor',
+          defaultRent: Number(negotiatedRent) || 0,
+          status: 'Occupied',
+        });
+      }
+      roomId = room._id;
+    }
+
+    if (!roomId) {
+      return res.status(400).json({ error: 'Room selection or room number is required' });
+    }
+
     const room = await Room.findOne({ _id: roomId, ...userQuery });
     if (!room) return res.status(404).json({ error: 'Selected room not found' });
 
@@ -143,7 +165,7 @@ exports.createTenant = async (req, res) => {
       photoUrl: photoUrl || '',
       photoPublicId: photoPublicId || '',
       roomId,
-      negotiatedRent: Number(negotiatedRent) || room.defaultRent,
+      negotiatedRent: Number(negotiatedRent) || room.defaultRent || 0,
       securityDeposit: Number(securityDeposit) || 0,
       meterNumber: meterNumber || `MTR-${room.roomNumber}`,
       initialReading: Number(initialReading) || 0,
@@ -202,3 +224,34 @@ exports.vacateTenant = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// @desc    Delete a tenant permanently and clean up records
+// @route   DELETE /api/tenants/:id
+exports.deleteTenant = async (req, res) => {
+  try {
+    const userQuery = req.user ? { userId: req.user._id } : {};
+    const tenant = await Tenant.findOne({ _id: req.params.id, ...userQuery });
+    if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+
+    const targetRoomId = tenant.roomId;
+
+    // Remove tenant
+    await tenant.deleteOne();
+
+    // Remove tenant's monthly bills / readings
+    await MonthlyBill.deleteMany({ tenantId: req.params.id, ...userQuery });
+
+    // If room has no other active tenant, mark room as Available
+    if (targetRoomId) {
+      const otherActive = await Tenant.findOne({ roomId: targetRoomId, status: 'Active', ...userQuery });
+      if (!otherActive) {
+        await Room.findOneAndUpdate({ _id: targetRoomId, ...userQuery }, { status: 'Available' });
+      }
+    }
+
+    res.json({ success: true, message: 'Tenant and associated records deleted successfully.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
